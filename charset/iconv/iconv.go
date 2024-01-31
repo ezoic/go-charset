@@ -3,10 +3,11 @@
 // It automatically registers all the character sets with the charset package,
 // so it is usually used simply for the side effects of importing it.
 // Example:
-//   import (
-//		"go-charset.googlecode.com/hg/charset"
-//		_ "go-charset.googlecode.com/hg/charset/iconv"
-//   )
+//
+//	  import (
+//			"go-charset.googlecode.com/hg/charset"
+//			_ "go-charset.googlecode.com/hg/charset/iconv"
+//	  )
 package iconv
 
 //#cgo LDFLAGS: -L/opt/local/lib
@@ -15,6 +16,12 @@ package iconv
 //#include <errno.h>
 //iconv_t iconv_open_error = (iconv_t)-1;
 //size_t iconv_error = (size_t)-1;
+//
+// size_t bridge_iconv(iconv_t cd,
+//		       char *inbuf, size_t *inbytesleft,
+//                     char *outbuf, size_t *outbytesleft) {
+//   return iconv(cd, &inbuf, inbytesleft, &outbuf, outbytesleft);
+// }
 import "C"
 import (
 	"errors"
@@ -109,18 +116,33 @@ func (iconvFactory) Info(name string) *charset.Charset {
 	}
 }
 
+func go_iconv(cd C.iconv_t, inbuf unsafe.Pointer, inbytesleft C.size_t, outbuf unsafe.Pointer, outbytesleft C.size_t) (C.size_t, error, unsafe.Pointer, C.size_t, unsafe.Pointer, C.size_t) {
+
+	preInbytesleft := inbytesleft
+	preOutbytesleft := outbytesleft
+
+	r, err := C.bridge_iconv(cd, (*C.char)(inbuf), &inbytesleft, (*C.char)(outbuf), &outbytesleft)
+
+	// update the pointers
+	inbuf = unsafe.Add(inbuf, uintptr(preInbytesleft)-uintptr(inbytesleft))
+	outbuf = unsafe.Add(outbuf, uintptr(preOutbytesleft)-uintptr(outbytesleft))
+
+	return r, err, inbuf, inbytesleft, outbuf, outbytesleft
+}
+
 func (p *iconvTranslator) Translate(data []byte, eof bool) (rn int, rd []byte, rerr error) {
 	n := 0
 	p.scratch = p.scratch[:0]
 	for len(data) > 0 {
 		p.scratch = ensureCap(p.scratch, len(p.scratch)+len(data)*utf8.UTFMax)
-		cData := (*C.char)(unsafe.Pointer(&data[:1][0]))
+		cData := unsafe.Pointer(&data[:1][0])
 		nData := C.size_t(len(data))
 
 		ns := len(p.scratch)
-		cScratch := (*C.char)(unsafe.Pointer(&p.scratch[ns : ns+1][0]))
+		cScratch := unsafe.Pointer(&p.scratch[ns : ns+1][0])
 		nScratch := C.size_t(cap(p.scratch) - ns)
-		r, err := C.iconv(p.cd, &cData, &nData, &cScratch, &nScratch)
+
+		r, err, cData, nData, cScratch, nScratch := go_iconv(p.cd, cData, nData, cScratch, nScratch)
 
 		p.scratch = p.scratch[0 : cap(p.scratch)-int(nScratch)]
 		n += len(data) - int(nData)
