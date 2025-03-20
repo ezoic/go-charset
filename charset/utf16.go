@@ -59,11 +59,25 @@ type translateToUTF16 struct {
 
 func (p *translateToUTF16) Translate(data []byte, eof bool) (int, []byte, error) {
 	p.scratch = ensureCap(p.scratch[:0], (len(data)+1)*2)
-	if p.first {
+	if p.first && p.endian != nil {
+		p.scratch = p.scratch[0:2]
+		p.endian.PutUint16(p.scratch, 0xfeff)
+		p.first = false
+	} else if p.endian == nil {
+		switch binary.BigEndian.Uint16(data) {
+		case 0xfeff:
+			p.endian = binary.BigEndian
+		case 0xfffe:
+			p.endian = binary.LittleEndian
+		default:
+			p.endian = guessEndian(data)
+		}
+
 		p.scratch = p.scratch[0:2]
 		p.endian.PutUint16(p.scratch, 0xfeff)
 		p.first = false
 	}
+
 	n := 0
 	for len(data) > 0 {
 		if !utf8.FullRune(data) && !eof {
