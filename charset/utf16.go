@@ -67,15 +67,14 @@ func (p *translateToUTF16) Translate(data []byte, eof bool) (int, []byte, error)
 		switch binary.BigEndian.Uint16(data) {
 		case 0xfeff:
 			p.endian = binary.BigEndian
-			data = data[2:]
 		case 0xfffe:
 			p.endian = binary.LittleEndian
-			data = data[2:]
 		default:
 			p.endian = guessEndian(data)
-			data = data[2:]
 		}
+
 		p.scratch = p.scratch[0:2]
+		p.endian.PutUint16(p.scratch, 0xfeff)
 		p.first = false
 	}
 
